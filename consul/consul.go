@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -73,8 +74,12 @@ type ConsulAdapter struct {
 	config *consulapi.Config
 }
 
+func (r *ConsulAdapter) RegisterAgentNode(dataCenterId string, hostIp string) (string, error) {
+	return "", nil
+}
+
 // Ping will try to connect to consul by attempting to retrieve the current leader.
-func (r *ConsulAdapter) Ping() error {
+func (r *ConsulAdapter) Ping(agentId string) error {
 	r.refreshConsulAdapter()
 
 	status := r.client.Status()
@@ -177,7 +182,7 @@ func (r *ConsulAdapter) Refresh(service *bridge.Service) error {
 	return nil
 }
 
-func (r *ConsulAdapter) Services() ([]*bridge.Service, error) {
+func (r *ConsulAdapter) Services(agentId string) ([]*bridge.Service, error) {
 	r.refreshConsulAdapter()
 
 	services, err := r.client.Agent().Services()
@@ -222,8 +227,12 @@ func (r *ConsulAdapter) refreshConsulAdapter() {
 	log.Println("refreshConsulAdapter: " + r.config.Address)
 }
 
+// windows 环境下hostNetwork模式无法访问 127.0.0.1的本机容器，需要通过挂载文件方式读取consul-client预先写入的地址
 // get url from local file
 func getUrlFromLocalFile() (*url.URL, error) {
+	if runtime.GOOS != "windows" {
+		return nil, nil
+	}
 	agentUrlFile := "C:/host/etc/consul/agent_url"
 	fileContent, err := ioutil.ReadFile(agentUrlFile)
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 )
+
 var serviceIDPattern = regexp.MustCompile(`^(.+?):([a-zA-Z0-9][a-zA-Z0-9_.-]+):[0-9]+(?::udp)?$`)
 
 type Bridge struct {
@@ -26,13 +27,12 @@ type Bridge struct {
 	docker         *client.Client
 	services       map[string][]*Service
 	deadContainers map[string]*DeadContainer
-	ctx context.Context
+	ctx            context.Context
 	config         Config
+	agentId        string
 }
 
-
-
-func New(docker *client.Client, adapterUri string, config Config,ctx context.Context) (*Bridge, error) {
+func New(docker *client.Client, adapterUri string, config Config, ctx context.Context) (*Bridge, error) {
 	uri, err := url.Parse(adapterUri)
 	if err != nil {
 		return nil, errors.New("bad adapter uri: " + adapterUri)
@@ -49,15 +49,30 @@ func New(docker *client.Client, adapterUri string, config Config,ctx context.Con
 		registry:       factory.New(uri),
 		services:       make(map[string][]*Service),
 		deadContainers: make(map[string]*DeadContainer),
-		ctx: ctx,
+		ctx:            ctx,
 	}, nil
 }
 
-// Ping
-func (b *Bridge) Ping() error {
-	return b.registry.Ping()
+// RegisterAgentNode
+func (b *Bridge) RegisterAgentNode() error {
+	agentId, err := b.registry.RegisterAgentNode(b.config.DataCenterId, b.config.HostIp)
+	if err != nil {
+		return err
+	}
+	b.agentId = agentId
+
+	return nil
 }
 
+// ping
+func (b *Bridge) ping() error {
+	err := b.registry.Ping(b.agentId)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func (b *Bridge) Add(containerId string) {
 	b.Lock()
@@ -97,7 +112,9 @@ func (b *Bridge) Sync(quiet bool) {
 	b.Lock()
 	defer b.Unlock()
 
-	containers, err := b.docker.ContainerList(b.ctx,types.ContainerListOptions{})
+	b.ping()
+
+	containers, err := b.docker.ContainerList(b.ctx, types.ContainerListOptions{})
 
 	if err != nil && quiet {
 		log.Println("error listing containers, skipping sync")
@@ -130,13 +147,13 @@ func (b *Bridge) Sync(quiet bool) {
 		// Remove services if its corresponding container is not running
 		log.Println("Listing non-exited containers")
 
-		filters:= dockerTypeFilters.NewArgs()
-		filters.Add("status","created")
-		filters.Add("status","restarting")
-		filters.Add("status","running")
-		filters.Add("status","paused")
+		filters := dockerTypeFilters.NewArgs()
+		filters.Add("status", "created")
+		filters.Add("status", "restarting")
+		filters.Add("status", "running")
+		filters.Add("status", "paused")
 
-		nonExitedContainers, err := b.docker.ContainerList(b.ctx,types.ContainerListOptions{Filters: filters})
+		nonExitedContainers, err := b.docker.ContainerList(b.ctx, types.ContainerListOptions{Filters: filters})
 		if err != nil {
 			log.Println("error listing nonExitedContainers, skipping sync", err)
 			return
@@ -157,7 +174,7 @@ func (b *Bridge) Sync(quiet bool) {
 		}
 
 		log.Println("Cleaning up dangling services")
-		extServices, err := b.registry.Services()
+		extServices, err := b.registry.Services(b.agentId)
 		if err != nil {
 			log.Println("cleanup failed:", err)
 			return
@@ -201,10 +218,10 @@ func (b *Bridge) shouldRemove(containerId string) bool {
 	if b.config.DeregisterCheck == "always" {
 		return true
 	}
-	container, err := b.docker.ContainerInspect(b.ctx,containerId)
-	errMsg:=err.Error()
+	container, err := b.docker.ContainerInspect(b.ctx, containerId)
+	errMsg := err.Error()
 
-	if strings.HasPrefix(errMsg,"no such container") {
+	if strings.HasPrefix(errMsg, "no such container") {
 		// the container has already been removed from Docker
 		// e.g. probabably run with "--rm" to remove immediately
 		// so its exit code is not accessible
@@ -266,7 +283,7 @@ func (b *Bridge) add(containerId string, quiet bool) {
 		return
 	}
 
-	container,err:=b.docker.ContainerInspect(b.ctx,containerId)
+	container, err := b.docker.ContainerInspect(b.ctx, containerId)
 	if err != nil {
 		log.Println("unable to inspect container:", containerId[:12], err)
 		return
@@ -362,6 +379,7 @@ func (b *Bridge) newService(port ServicePort, isgroup bool) *Service {
 	}
 
 	service := new(Service)
+	service.AgentId = b.agentId
 	service.Origin = port
 	service.ID = hostname + ":" + container.Name[1:] + ":" + port.ExposedPort
 	service.Name = serviceName
@@ -402,7 +420,7 @@ func (b *Bridge) newService(port ServicePort, isgroup bool) *Service {
 		if strings.HasPrefix(networkMode, "container:") {
 			networkContainerId := strings.Split(networkMode, ":")[1]
 			log.Println(service.Name + ": detected container NetworkMode, linked to: " + networkContainerId[:12])
-			networkContainer, err := b.docker.ContainerInspect(b.ctx,networkContainerId)
+			networkContainer, err := b.docker.ContainerInspect(b.ctx, networkContainerId)
 			if err != nil {
 				log.Println("unable to inspect network container:", networkContainerId[:12], err)
 			} else {
@@ -434,7 +452,6 @@ func (b *Bridge) newService(port ServicePort, isgroup bool) *Service {
 
 	return service
 }
-
 
 var Hostname string
 

@@ -10,11 +10,12 @@ type AdapterFactory interface {
 }
 
 type RegistryAdapter interface {
-	Ping() error
+	RegisterAgentNode(dataCenterId string, hostIp string) (string, error)
+	Ping(agentId string) error
 	Register(service *Service) error
 	Deregister(service *Service) error
 	Refresh(service *Service) error
-	Services() ([]*Service, error)
+	Services(agentId string) ([]*Service, error)
 }
 
 type Config struct {
@@ -27,18 +28,19 @@ type Config struct {
 	RefreshInterval int
 	DeregisterCheck string
 	Cleanup         bool
+	DataCenterId    string
 }
 
 type Service struct {
-	ID    string
-	Name  string
-	Port  int
-	IP    string
-	Tags  []string
-	Attrs map[string]string
-	TTL   int
-
-	Origin ServicePort
+	ID      string
+	Name    string
+	Port    int
+	IP      string
+	Tags    []string
+	Attrs   map[string]string
+	TTL     int
+	AgentId string
+	Origin  ServicePort
 }
 
 type ServicePort struct {

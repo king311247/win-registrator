@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"win-registrator/bridge"
+	_ "win-registrator/bridge"
 )
 
 func assert(err error) {
@@ -33,6 +34,7 @@ var deregister = flag.String("deregister", "always", "Deregister exited services
 var retryAttempts = flag.Int("retry-attempts", 0, "Max retry attempts to establish a connection with the backend. Use -1 for infinite retries")
 var retryInterval = flag.Int("retry-interval", 2000, "Interval (in millisecond) between retry-attempts.")
 var cleanup = flag.Bool("cleanup", false, "Remove dangling services")
+var dataCenterId = flag.String("data-center-id", "", "data center id")
 
 func main() {
 	flag.Usage = func() {
@@ -99,6 +101,7 @@ func main() {
 		RefreshInterval: *refreshInterval,
 		DeregisterCheck: *deregister,
 		Cleanup:         *cleanup,
+		DataCenterId:    *dataCenterId,
 	}, ctx)
 	assert(err)
 
@@ -106,7 +109,7 @@ func main() {
 	for *retryAttempts == -1 || attempt <= *retryAttempts {
 		log.Printf("Connecting to backend (%v/%v)", attempt, *retryAttempts)
 
-		err := regBridge.Ping()
+		err := regBridge.RegisterAgentNode()
 		if err == nil {
 			break
 		}
